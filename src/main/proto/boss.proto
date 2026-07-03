@@ -1,0 +1,27 @@
+syntax = "proto3";
+package proto;
+
+option java_multiple_files = true;
+option java_package = "com.tub.boss";
+
+import "common.proto";
+
+message CreateTaskRequest {
+  string title = 1;
+  string description = 2;
+  string memberID = 3;
+}
+
+message MetricsRequest {}
+
+message MetricsResponse {
+  int32 totalTasks = 1;
+  int32 openTasks = 2;
+  int32 inProgressTasks = 3;
+  int32 doneTasks = 4;
+}
+
+service BossService {
+  rpc CreateTask (CreateTaskRequest) returns (Task);
+  rpc GetMetrics (MetricsRequest) returns (MetricsResponse);
+}
