@@ -21,6 +21,11 @@ public class MemberClient {
         for (Task t : ergebnis.getTasksList()) {
             System.out.println( t.getTaskID() + " Task ID "+ t.getTitle() +"Titel" + t.getStatus() + " Task Status");
         }
+        if (ergebnis.getTasksCount() == 0) {
+            System.out.println("Keine Tasks für diesen Member vorhanden.");
+            channel.shutdown();
+            return;
+        }
         long id = ergebnis.getTasks(0).getTaskID();
         CompleteTaskRequest completeTaskRequest = CompleteTaskRequest.newBuilder()
                 .setTaskID(id)

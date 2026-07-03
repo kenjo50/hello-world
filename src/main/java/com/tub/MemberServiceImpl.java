@@ -32,13 +32,21 @@ public class MemberServiceImpl extends MemberServiceGrpc.MemberServiceImplBase{
     @Override
     public void completeTask(CompleteTaskRequest request, StreamObserver<Task> responseObserver){
         long taskID = request.getTaskID();
-        Task alteTask =tasks.get(taskID);
-                Task neueTask = alteTask.toBuilder()
+        // Atomares Read-Modify-Write: verhindert verlorene Updates bei parallelen Zugriffen
+        // auf denselben Task (im Gegensatz zu get(..) + put(..)).
+        Task neueTask = tasks.computeIfPresent(taskID,
+                (id, alteTask) -> alteTask.toBuilder()
                         .setStatus(TaskStatus.DONE)
-                        .build();
-                tasks.put(taskID,neueTask);
-                responseObserver.onNext(neueTask);
-                responseObserver.onCompleted();
+                        .build());
+        if (neueTask == null) {
+            // Task existiert nicht -> sauberer gRPC-Fehler statt NullPointerException
+            responseObserver.onError(io.grpc.Status.NOT_FOUND
+                    .withDescription("Task " + taskID + " existiert nicht")
+                    .asRuntimeException());
+            return;
+        }
+        responseObserver.onNext(neueTask);
+        responseObserver.onCompleted();
     }
 
 
