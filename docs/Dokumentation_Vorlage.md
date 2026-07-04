@@ -66,17 +66,20 @@ und wie dieselbe Map an `new BossServiceImpl(tasks)` und
 
 [Erkläre in 3–5 Sätzen die Tests in `ThreadSafetyTest`: Test 1
 (`taskAnlegenUndAbhaken`) prüft die Grundfunktion (Task anlegen + abhaken →
-Status `DONE`). Test 2 (`mehrereClientsGleichzeitig`) zeigt die Thread-Safety:
-**5 Boss-Clients** legen **gleichzeitig** je 20 Tasks an (= 100 Tasks), jeder in
-einem eigenen `Thread` (mit `start()` gestartet, mit `join()` abgewartet).
-Nenne den Beweis: Am Ende liegen genau 100 Tasks in der Map — wäre der Server
-nicht thread safe, gingen Tasks verloren oder IDs würden doppelt vergeben, dann
-wäre die Anzahl kleiner. Das belegt `ConcurrentHashMap` (keine verlorenen
-Schreibzugriffe) und `AtomicLong` (eindeutige IDs).]
+Status `DONE`). Test 2 (`mehrereClientsGleichzeitig`) zeigt die Thread-Safety mit
+gemischtem Parallelzugriff: **5 Boss-Clients** legen gleichzeitig je 20 Tasks an
+(= 100 Tasks, schreiben), **während 3 Member-Clients** parallel immer wieder
+`getMyTasks` aufrufen (lesen — iteriert intern über `store.values()`). So greifen
+**beide Client-Arten zeitgleich** auf dieselbe Datenhaltung zu; alle Threads
+starten mit `start()` und werden mit `join()` abgewartet. Nenne die zwei Beweise:
+`assertEquals(100, store.size())` (kein Schreibzugriff ging verloren → belegt
+`ConcurrentHashMap` + `AtomicLong`) und `assertFalse(leseFehler)` (paralleles Lesen
+ohne `ConcurrentModificationException` — bei einer normalen `HashMap` würde genau
+das fehlschlagen).]
 
-[CODE-AUSSCHNITT EINFÜGEN: den Kern von Test 2 — die `new Thread(...)`-Schleife
-mit `stub.createTask(...)`, die `start()`/`join()`-Schleifen und das
-abschließende `assertEquals(100, store.size())`.]
+[CODE-AUSSCHNITT EINFÜGEN: den Kern von Test 2 — die Boss- und Member-`Thread`s,
+die `start()`/`join()`-Schleifen für beide Gruppen und die beiden Prüfungen
+`assertEquals(100, store.size())` sowie `assertFalse(leseFehler.get())`.]
 
 [SCREENSHOT EINFÜGEN: der **grüne** Testlauf, auf dem
 „Tests run: 2, Failures: 0, Errors: 0" für `ThreadSafetyTest` zu sehen ist.]

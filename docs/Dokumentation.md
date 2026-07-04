@@ -105,36 +105,42 @@ einen echten Server auf einem freien Port, der sich eine gemeinsame
 
 - **`taskAnlegenUndAbhaken`** prüft die Grundfunktion: Der Boss-Client legt einen
   Task an, der Member-Client hakt ihn ab, und der Status ist danach `DONE`.
-- **`mehrereClientsGleichzeitig`** zeigt die Thread-Safety: **5 Boss-Clients**
-  legen **gleichzeitig** je 20 Tasks an (= 100 Tasks). Jeder Client läuft in einem
-  eigenen `Thread`; alle werden mit `start()` gestartet und mit `join()`
-  abgewartet.
+- **`mehrereClientsGleichzeitig`** zeigt die Thread-Safety mit gemischtem
+  Parallelzugriff: **5 Boss-Clients** legen gleichzeitig je 20 Tasks an
+  (= 100 Tasks, **schreiben**), **während 3 Member-Clients** parallel immer wieder
+  `getMyTasks` aufrufen (**lesen** — iteriert intern über `store.values()`). So
+  greifen **beide Client-Arten zeitgleich** auf dieselbe Datenhaltung zu. Jeder
+  Client läuft in einem eigenen `Thread`; alle werden mit `start()` gestartet und
+  mit `join()` abgewartet.
 
 ```java
-Thread[] threads = new Thread[anzahlThreads];
-for (int i = 0; i < anzahlThreads; i++) {
-    threads[i] = new Thread(new Runnable() {
-        public void run() {
-            // jeder Thread ist ein eigener Client mit eigener Verbindung
-            for (int j = 0; j < tasksProThread; j++) {
-                stub.createTask(request);
-            }
-        }
-    });
+// Member-Threads lesen, WAEHREND die Boss-Threads schreiben
+AtomicBoolean leseFehler = new AtomicBoolean(false);
+// ...
+try {
+    for (int k = 0; k < 50; k++) {
+        stub.getMyTasks(GetMyTasksRequest.newBuilder().setMemberID("anna").build());
+    }
+} catch (Exception e) {
+    leseFehler.set(true); // z.B. ConcurrentModificationException -> nicht thread safe
 }
-for (int i = 0; i < anzahlThreads; i++) threads[i].start();
-for (int i = 0; i < anzahlThreads; i++) threads[i].join();
 
-// Genau 5 * 20 = 100 Tasks müssen in der Map liegen.
-assertEquals(100, store.size());
+// Bosse und Member ueberlappend starten und auf beide Gruppen warten
+for (int i = 0; i < anzahlThreads; i++) threads[i].start();
+for (int i = 0; i < anzahlMember;  i++) memberThreads[i].start();
+for (int i = 0; i < anzahlThreads; i++) threads[i].join();
+for (int i = 0; i < anzahlMember;  i++) memberThreads[i].join();
+
+assertEquals(100, store.size());   // kein Schreibzugriff ging verloren
+assertFalse(leseFehler.get());     // paralleles Lesen lief fehlerfrei
 ```
 
-Wäre der Server **nicht** thread safe, würden bei den parallelen Zugriffen Tasks
-verloren gehen oder IDs doppelt vergeben — dann läge die Anzahl **unter** 100 und
-der Test schlüge fehl. Dass am Ende genau 100 Tasks vorhanden sind, belegt den
-korrekten Einsatz von `ConcurrentHashMap` (keine verlorenen Schreibzugriffe) und
-`AtomicLong` (keine doppelten IDs). Zur Kontrolle wird dieselbe Zahl auch über die
-Metriken-API (`getMetrics`) geprüft.
+Zwei Prüfungen belegen die Korrektheit: `assertEquals(100, store.size())` zeigt,
+dass kein Schreibzugriff verloren ging (sonst läge die Zahl **unter** 100 — Beweis
+für `ConcurrentHashMap` und die eindeutigen IDs via `AtomicLong`).
+`assertFalse(leseFehler)` zeigt, dass das gleichzeitige Lesen der Member-Clients
+ohne `ConcurrentModificationException` durchlief — bei einer normalen `HashMap`
+würde genau dieses Iterieren während der parallelen Schreibzugriffe fehlschlagen.
 
 **Ergebnis:** `Tests run: 2, Failures: 0, Errors: 0`.
 
