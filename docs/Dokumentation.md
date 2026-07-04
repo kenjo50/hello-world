@@ -1,6 +1,6 @@
 # Übung 2: Communication & The Web — Dokumentation
 
-**Name:** _[Dein Name]_
+**Name:** Oliver Grabka
 **Matrikelnummer:** _[Deine Matrikelnummer]_
 **Modul:** Engineering verteilter Anwendungen — TU Berlin
 
@@ -99,38 +99,46 @@ Mitglieder wider.
 
 ### Anforderung 4 — JUnit-Test für Thread-Safety (2P)
 
-Der Test `ThreadSafetyTest` startet einen echten Server (auf einem freien Port)
-und lässt **gleichzeitig** viele Clients unterschiedlicher Art auf ihn los:
+Die Tests stehen in `ThreadSafetyTest`. `@BeforeEach` startet für jeden Test
+einen echten Server auf einem freien Port, der sich eine gemeinsame
+`ConcurrentHashMap` mit beiden Services teilt.
 
-- **8 Boss-Clients** erstellen parallel je 50 Tasks (= 400 Tasks),
-- **4 Member-Clients** haken parallel ihre Tasks ab,
-- **4 Metrik-Clients** lesen währenddessen laufend über die Datenhaltung.
-
-Alle Threads starten über eine `CyclicBarrier` gleichzeitig, um maximale
-Nebenläufigkeit zu erzeugen.
+- **`taskAnlegenUndAbhaken`** prüft die Grundfunktion: Der Boss-Client legt einen
+  Task an, der Member-Client hakt ihn ab, und der Status ist danach `DONE`.
+- **`mehrereClientsGleichzeitig`** zeigt die Thread-Safety: **5 Boss-Clients**
+  legen **gleichzeitig** je 20 Tasks an (= 100 Tasks). Jeder Client läuft in einem
+  eigenen `Thread`; alle werden mit `start()` gestartet und mit `join()`
+  abgewartet.
 
 ```java
-CyclicBarrier startR1 = new CyclicBarrier(BOSSES + METRIC_READERS);
-...
-startR1.await(); // alle Boss-Clients starten gleichzeitig
-Task created = stub.createTask(...);
-assertTrue(createdIds.add(created.getTaskID()),
-        "Doppelte Task-ID vergeben (nicht thread safe)");
+Thread[] threads = new Thread[anzahlThreads];
+for (int i = 0; i < anzahlThreads; i++) {
+    threads[i] = new Thread(new Runnable() {
+        public void run() {
+            // jeder Thread ist ein eigener Client mit eigener Verbindung
+            for (int j = 0; j < tasksProThread; j++) {
+                stub.createTask(request);
+            }
+        }
+    });
+}
+for (int i = 0; i < anzahlThreads; i++) threads[i].start();
+for (int i = 0; i < anzahlThreads; i++) threads[i].join();
+
+// Genau 5 * 20 = 100 Tasks müssen in der Map liegen.
+assertEquals(100, store.size());
 ```
 
-Der Test beweist die Thread-Safety über drei Zusicherungen:
+Wäre der Server **nicht** thread safe, würden bei den parallelen Zugriffen Tasks
+verloren gehen oder IDs doppelt vergeben — dann läge die Anzahl **unter** 100 und
+der Test schlüge fehl. Dass am Ende genau 100 Tasks vorhanden sind, belegt den
+korrekten Einsatz von `ConcurrentHashMap` (keine verlorenen Schreibzugriffe) und
+`AtomicLong` (keine doppelten IDs). Zur Kontrolle wird dieselbe Zahl auch über die
+Metriken-API (`getMetrics`) geprüft.
 
-1. **Keine ID-Kollisionen:** 400 erstellte Tasks ⇒ 400 eindeutige IDs
-   (belegt den korrekten Einsatz von `AtomicLong`).
-2. **Keine verlorenen Schreibzugriffe:** `store.size() == 400`
-   (belegt den korrekten Einsatz der `ConcurrentHashMap`).
-3. **Sichere parallele Iteration:** Die Metrik-Clients lesen ständig über die
-   Map, während geschrieben wird — mit einer gewöhnlichen `HashMap` gäbe es hier
-   eine `ConcurrentModificationException`.
+**Ergebnis:** `Tests run: 2, Failures: 0, Errors: 0`.
 
-**Ergebnis:** `Tests run: 1, Failures: 0, Errors: 0`.
-
-> _[Screenshot-Vorschlag: grüner Testlauf von `ThreadSafetyTest`.]_
+> _[Screenshot-Vorschlag: grüner Testlauf von `ThreadSafetyTest` (beide Tests).]_
 
 ---
 
@@ -140,7 +148,7 @@ Der Test beweist die Thread-Safety über drei Zusicherungen:
 
 Ein **Wetter-Vergleich** (`WeatherClient`). Der Nutzer gibt mehrere Städte über
 die Konsole ein; das Programm ermittelt für jede Stadt das aktuelle Wetter und
-erstellt am Ende eine Rangliste nach aktueller Temperatur.
+bestimmt am Ende die wärmste Stadt.
 
 Verwendete APIs (beide frei, ohne Schlüssel — [open-meteo.com](https://open-meteo.com)):
 
@@ -185,56 +193,70 @@ Die Antworten werden **nicht nur ausgegeben**, sondern weiterverarbeitet:
 1. **Verkettung (Output → Input):** Die Koordinaten aus der Antwort von API 1
    sind die Eingabeparameter für API 2.
 2. **Aggregation:** Aus den Stundenwerten von API 2 werden **Minimum, Maximum
-   und Durchschnitt** der Temperatur berechnet.
-3. **Ranking:** Über alle Städte hinweg wird nach aktueller Temperatur sortiert
-   und die wärmste Stadt bestimmt.
+   und Durchschnitt** der Temperatur mit einer einfachen `for`-Schleife berechnet.
+3. **Vergleich:** Über alle eingegebenen Städte hinweg wird per Schleife die
+   Stadt mit der höchsten aktuellen Temperatur bestimmt.
 
 ```java
 CityWeather summarize(GeoResult place, ForecastResponse forecast) {
-    List<Double> temps = forecast.hourly.temperature_2m;
-    double min = temps.get(0), max = temps.get(0), sum = 0;
-    for (double t : temps) { min = Math.min(min, t); max = Math.max(max, t); sum += t; }
-    double avg = sum / temps.size();
-    return new CityWeather(label, forecast.current.temperature_2m, min, max, avg);
+    ArrayList<Double> temps = forecast.hourly.temperature_2m;
+    double min = temps.get(0);
+    double max = temps.get(0);
+    double summe = 0;
+    for (int i = 0; i < temps.size(); i++) {
+        double t = temps.get(i);
+        if (t < min) { min = t; }
+        if (t > max) { max = t; }
+        summe = summe + t;
+    }
+    double durchschnitt = summe / temps.size();
+    // ... Werte in ein CityWeather-Objekt schreiben und zurückgeben
+}
+```
+
+Und die wärmste Stadt über alle Aufrufe hinweg:
+
+```java
+CityWeather waermste = results.get(0);
+for (int i = 1; i < results.size(); i++) {
+    if (results.get(i).current > waermste.current) {
+        waermste = results.get(i);
+    }
 }
 ```
 
 Die Verarbeitungslogik ist zusätzlich durch den Offline-Test
-`WeatherClientTest` (3 Tests, mit echten Beispiel-Responses) abgesichert.
+`WeatherClientTest` (2 Tests, mit festen Beispiel-Antworten) abgesichert.
 
-> _[Screenshot-Vorschlag: Konsolenausgabe mit dem Ranking mehrerer Städte.]_
+> _[Screenshot-Vorschlag: Konsolenausgabe mit den Temperaturen mehrerer Städte
+> und der wärmsten Stadt.]_
 
 ---
 
 ## 3 TU User Page (2 Punkte)
 
-**Link zur Webseite:** _[https://www.user.tu-berlin.de/DEIN-KONTO/ hier eintragen]_
+**Link zur Webseite:** https://user.tu-berlin.de/oliver5/
 
 ### Inhalt und valides HTML (1P)
 
-Die Seite (`userpage/index.html`) stellt mein Übungsprojekt vor (gRPC-System und
-HTTP-Client, Client-Server-Modell). Sie ist valides HTML5 (`<!DOCTYPE html>`,
-`lang="de"`, korrekt geschachtelte Tags) und enthält echten inhaltlichen Text.
+Die Seite stellt mein Übungsprojekt vor (gRPC-System und HTTP-Client,
+Client-Server-Modell). Sie ist valides HTML5 (`<!DOCTYPE html>`, `lang="de"`,
+korrekt geschachtelte Tags) und enthält echten inhaltlichen Text.
 
 ### JavaScript für Interaktivität (1P)
 
 Die Seite nutzt JavaScript für zwei Funktionen:
 
-1. Eine **Live-Uhr**, die jede Sekunde das aktuelle Datum und die Uhrzeit
-   aktualisiert (`setInterval`).
-2. Ein **interaktives Task-Board**: Man kann Aufgaben hinzufügen, per Klick als
-   erledigt markieren und sieht einen live aktualisierten Zähler — komplett im
-   Browser, als kleines Abbild des gRPC-Beispiels.
+1. Eine **Live-Uhr**, die mit `setInterval` jede Sekunde die aktuelle Uhrzeit
+   aktualisiert.
+2. Einen **Button mit Klick-Zähler**: Bei jedem Klick wird ein Zähler erhöht und
+   der angezeigte Text auf der Seite aktualisiert.
 
-```javascript
-form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    tasks.push({ title: input.value.trim(), done: false });
-    render();  // Liste + Zähler neu aufbauen
-});
-```
+> _[Code-Ausschnitt einfügen: den `<script>`-Teil aus deiner index.html — die
+> Live-Uhr mit `setInterval(...)` und den Klick-Handler des Buttons.]_
 
-> _[Screenshot-Vorschlag: die veröffentlichte Seite mit Live-Uhr und Task-Board.]_
+> _[Screenshot-Vorschlag: die veröffentlichte Seite im Browser mit sichtbarer URL
+> `user.tu-berlin.de/oliver5/`, Live-Uhr und Button-Zähler.]_
 
 ---
 

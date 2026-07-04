@@ -64,21 +64,22 @@ und wie dieselbe Map an `new BossServiceImpl(tasks)` und
 
 ### Anforderung 4 — JUnit-Test für Thread-Safety (2P)
 
-[Erkläre in 3–5 Sätzen den Test `ThreadSafetyTest`: Es verbinden sich
-**gleichzeitig** 8 Boss-Clients (erstellen je 50 Tasks), 4 Member-Clients (haken
-ab) und 4 Metrik-Clients (lesen laufend) mit dem Server; alle starten über eine
-`CyclicBarrier` gleichzeitig. Nenne die drei Beweise:
-(1) 400 Tasks ⇒ 400 eindeutige IDs (AtomicLong korrekt),
-(2) `store.size() == 400`, keine verlorenen Schreibzugriffe (ConcurrentHashMap korrekt),
-(3) paralleles Lesen wirft keine ConcurrentModificationException.]
+[Erkläre in 3–5 Sätzen die Tests in `ThreadSafetyTest`: Test 1
+(`taskAnlegenUndAbhaken`) prüft die Grundfunktion (Task anlegen + abhaken →
+Status `DONE`). Test 2 (`mehrereClientsGleichzeitig`) zeigt die Thread-Safety:
+**5 Boss-Clients** legen **gleichzeitig** je 20 Tasks an (= 100 Tasks), jeder in
+einem eigenen `Thread` (mit `start()` gestartet, mit `join()` abgewartet).
+Nenne den Beweis: Am Ende liegen genau 100 Tasks in der Map — wäre der Server
+nicht thread safe, gingen Tasks verloren oder IDs würden doppelt vergeben, dann
+wäre die Anzahl kleiner. Das belegt `ConcurrentHashMap` (keine verlorenen
+Schreibzugriffe) und `AtomicLong` (eindeutige IDs).]
 
-[CODE-AUSSCHNITT EINFÜGEN: den Kern des Tests — die parallele
-`createTask`-Schleife mit `assertTrue(createdIds.add(id), ...)` und die
-abschließenden `assertEquals(TOTAL_TASKS, createdIds.size())` /
-`assertEquals(TOTAL_TASKS, store.size())`.]
+[CODE-AUSSCHNITT EINFÜGEN: den Kern von Test 2 — die `new Thread(...)`-Schleife
+mit `stub.createTask(...)`, die `start()`/`join()`-Schleifen und das
+abschließende `assertEquals(100, store.size())`.]
 
 [SCREENSHOT EINFÜGEN: der **grüne** Testlauf, auf dem
-„Tests run: 1, Failures: 0, Errors: 0" für `ThreadSafetyTest` zu sehen ist.]
+„Tests run: 2, Failures: 0, Errors: 0" für `ThreadSafetyTest` zu sehen ist.]
 
 ---
 
@@ -88,8 +89,8 @@ abschließenden `assertEquals(TOTAL_TASKS, createdIds.size())` /
 
 [Beschreibe in 2–4 Sätzen den Anwendungsfall „Wetter-Vergleich" (`WeatherClient`):
 Der Nutzer gibt mehrere Städte über die Konsole ein; für jede Stadt werden die
-Koordinaten ermittelt und daraus das Wetter geladen; am Ende gibt es eine
-Rangliste nach aktueller Temperatur. Nenne die zwei APIs mit Namen:
+Koordinaten ermittelt und daraus das Wetter geladen; am Ende wird die wärmste
+Stadt bestimmt. Nenne die zwei APIs mit Namen:
 Open-Meteo **Geocoding** und Open-Meteo **Forecast** (beide ohne API-Schlüssel).]
 
 ### Anforderung 1 & 2 — zwei APIs, mind. eine mehrfach aufgerufen (1P)
@@ -123,22 +124,23 @@ Codezeilen, wo dieser Input später verwendet wird".]
 [Erkläre in 3–4 Sätzen die Weiterverarbeitung (nicht nur ausgeben!):
 (1) **Verkettung** — die Koordinaten aus der Antwort von API 1 sind die
 Eingabe für API 2;
-(2) **Aggregation** — aus den Stundenwerten werden Min/Max/Durchschnitt berechnet;
-(3) **Ranking** — über alle Städte hinweg wird nach aktueller Temperatur sortiert
-und die wärmste Stadt bestimmt.]
+(2) **Aggregation** — aus den Stundenwerten werden Min/Max/Durchschnitt mit einer
+`for`-Schleife berechnet;
+(3) **Vergleich** — über alle eingegebenen Städte hinweg wird per Schleife die
+Stadt mit der höchsten aktuellen Temperatur bestimmt.]
 
 [CODE-AUSSCHNITT EINFÜGEN: die Methode `summarize(...)` (Min/Max/Durchschnitt)
 UND die Zeile, in der `place.latitude/longitude` aus API 1 an `client.forecast(...)`
 für API 2 übergeben werden (Verkettung).]
 
-[SCREENSHOT EINFÜGEN: die Konsolenausgabe mit dem Ranking mehrerer Städte
-(„--- Ranking nach aktueller Temperatur ---").]
+[SCREENSHOT EINFÜGEN: die Konsolenausgabe mit den Temperaturen mehrerer Städte
+und der Zeile „Am waermsten ist es gerade in …".]
 
 ---
 
 ## 3 TU User Page (2 Punkte)
 
-**Link zur veröffentlichten Webseite:** [https://www.user.tu-berlin.de/DEIN-KONTO/ — hier den echten, öffentlich erreichbaren Link eintragen. Ohne Link keine Punkte!]
+**Link zur veröffentlichten Webseite:** https://user.tu-berlin.de/oliver5/
 
 ### Inhalt und valides HTML (1P)
 
@@ -151,15 +153,15 @@ URL in der Adressleiste — belegt, dass sie wirklich online ist).]
 
 ### JavaScript für Interaktivität (1P)
 
-[Erkläre in 2–3 Sätzen die zwei JS-Funktionen: eine **Live-Uhr**, die jede
-Sekunde aktualisiert (`setInterval`), und das **interaktive Task-Board**
-(Aufgabe hinzufügen, abhaken, Live-Zähler).]
+[Erkläre in 2–3 Sätzen die zwei JS-Funktionen: eine **Live-Uhr**, die mit
+`setInterval` jede Sekunde die Uhrzeit aktualisiert, und einen **Button mit
+Klick-Zähler**, der bei jedem Klick den Zähler erhöht und den Text aktualisiert.]
 
-[CODE-AUSSCHNITT EINFÜGEN: den `<script>`-Teil — z. B. die `updateClock()`-Funktion
-mit `setInterval(updateClock, 1000)` und den `form.addEventListener("submit", …)`.]
+[CODE-AUSSCHNITT EINFÜGEN: den `<script>`-Teil aus deiner index.html — die
+Live-Uhr mit `setInterval(...)` und den Klick-Handler des Buttons.]
 
-[SCREENSHOT EINFÜGEN: die Seite im Browser, auf dem die Live-Uhr und ein paar
-selbst hinzugefügte Aufgaben im Task-Board zu sehen sind.]
+[SCREENSHOT EINFÜGEN: die veröffentlichte Seite im Browser mit sichtbarer URL
+`user.tu-berlin.de/oliver5/`, Live-Uhr und Button-Zähler.]
 
 ---
 
