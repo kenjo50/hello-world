@@ -2,98 +2,70 @@ package com.tub.web;
 
 import com.google.gson.Gson;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
 import java.util.Scanner;
 
-/**
- * Aufgabe 2: HTTP-Client, der zwei unterschiedliche Web-APIs aufruft.
- *
- * Anwendungsfall "Wetter-Vergleich":
- *  - API 1 (Geocoding, geocoding-api.open-meteo.com): wandelt einen vom Nutzer
- *    eingegebenen Ortsnamen in Koordinaten um.
- *  - API 2 (Forecast, api.open-meteo.com): liefert zu diesen Koordinaten die
- *    Temperaturen. Die Koordinaten stammen aus der Antwort von API 1
- *    (-> Verkettung: Output der ersten API ist Input der zweiten).
- *
- * Erfüllte Anforderungen:
- *  1. Zwei unterschiedliche Web-APIs.
- *  2. Beide APIs werden je Stadt aufgerufen -> bei mehreren Städten mehrfach.
- *  3. Nicht-statische Parameter: Ortsnamen kommen von der Konsole und die
- *     "aktuelle Temperatur" hängt vom Zeitpunkt der Ausführung ab.
- *  4. Antworten werden weiterverarbeitet: Koordinaten (API 1) fließen in API 2,
- *     aus den Stundenwerten werden Min/Max/Durchschnitt berechnet und am Ende
- *     die Städte nach aktueller Temperatur sortiert (Ranking).
- *
- * Beide APIs sind frei und ohne API-Schlüssel nutzbar (open-meteo.com).
- */
+// HTTP-Client fuer Aufgabe 2.
+// Ruft nacheinander zwei APIs von open-meteo auf:
+//   API 1 (Geocoding): Ortsname -> Koordinaten
+//   API 2 (Forecast) : Koordinaten -> Temperaturen
+// Die Koordinaten aus API 1 werden als Eingabe fuer API 2 benutzt (Verkettung).
+// Beide APIs sind kostenlos und brauchen keinen API-Schluessel.
 public class WeatherClient {
 
-    private static final String GEOCODING_API =
-            "https://geocoding-api.open-meteo.com/v1/search";
-    private static final String FORECAST_API =
-            "https://api.open-meteo.com/v1/forecast";
+    // Die beiden API-Adressen
+    static final String GEOCODING_API = "https://geocoding-api.open-meteo.com/v1/search";
+    static final String FORECAST_API = "https://api.open-meteo.com/v1/forecast";
 
-    private final HttpClient http;
-    private final Gson gson = new Gson();
+    // HttpClient und Gson einfach hier erzeugen
+    HttpClient client = HttpClient.newHttpClient();
+    Gson gson = new Gson();
 
-    public WeatherClient(HttpClient http) {
-        this.http = http;
-    }
-
-    // ----------------------------- HTTP-Aufrufe -----------------------------
-
-    /** API 1: Ortsname -> Koordinaten. */
-    public GeoResult geocode(String city) throws IOException, InterruptedException {
+    // API 1: Ortsname -> Koordinaten
+    GeoResult geocode(String city) throws Exception {
         String url = GEOCODING_API
                 + "?name=" + URLEncoder.encode(city, StandardCharsets.UTF_8)
                 + "&count=1&language=de&format=json";
-        String body = get(url);
-        GeoResponse response = parseGeo(body);
-        if (response.results == null || response.results.isEmpty()) {
-            return null;
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .GET()
+                .uri(URI.create(url))
+                .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        // Antwort (JSON) in unsere Klassen umwandeln
+        GeoResponse antwort = parseGeo(response.body());
+        if (antwort.results == null || antwort.results.size() == 0) {
+            return null; // Ort wurde nicht gefunden
         }
-        return response.results.get(0);
+        return antwort.results.get(0); // wir nehmen den ersten Treffer
     }
 
-    /** API 2: Koordinaten -> Wetter. Die Parameter stammen aus dem Ergebnis von API 1. */
-    public ForecastResponse forecast(double latitude, double longitude)
-            throws IOException, InterruptedException {
+    // API 2: Koordinaten -> Wetter
+    ForecastResponse forecast(double latitude, double longitude) throws Exception {
         String url = FORECAST_API
                 + "?latitude=" + latitude
                 + "&longitude=" + longitude
                 + "&current=temperature_2m"
                 + "&hourly=temperature_2m"
                 + "&forecast_days=1&timezone=auto";
-        return parseForecast(get(url));
-    }
 
-    private String get(String url) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Accept", "application/json")
                 .GET()
+                .uri(URI.create(url))
                 .build();
-        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            throw new IOException("Unerwarteter HTTP-Status " + response.statusCode()
-                    + " von " + url);
-        }
-        return response.body();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        return parseForecast(response.body());
     }
 
-    // --------------------- reine (offline testbare) Logik -------------------
-
+    // JSON mit Gson parsen (in eigene Methoden ausgelagert, damit man es testen kann)
     GeoResponse parseGeo(String json) {
         return gson.fromJson(json, GeoResponse.class);
     }
@@ -102,85 +74,90 @@ public class WeatherClient {
         return gson.fromJson(json, ForecastResponse.class);
     }
 
-    /** Verarbeitet beide API-Antworten zu einer Zusammenfassung (Min/Max/Durchschnitt). */
+    // Aus beiden Antworten die Min-, Max- und Durchschnittstemperatur berechnen
     CityWeather summarize(GeoResult place, ForecastResponse forecast) {
-        List<Double> temps = forecast.hourly.temperature_2m;
+        ArrayList<Double> temps = forecast.hourly.temperature_2m;
+
         double min = temps.get(0);
         double max = temps.get(0);
-        double sum = 0;
-        for (double t : temps) {
-            min = Math.min(min, t);
-            max = Math.max(max, t);
-            sum += t;
+        double summe = 0;
+        for (int i = 0; i < temps.size(); i++) {
+            double t = temps.get(i);
+            if (t < min) {
+                min = t;
+            }
+            if (t > max) {
+                max = t;
+            }
+            summe = summe + t;
         }
-        double avg = sum / temps.size();
-        double current = forecast.current.temperature_2m;
+        double durchschnitt = summe / temps.size();
 
-        String label = place.name + (place.country != null ? ", " + place.country : "");
-        return new CityWeather(label, current, min, max, avg);
+        CityWeather ergebnis = new CityWeather();
+        ergebnis.label = place.name + ", " + place.country;
+        ergebnis.current = forecast.current.temperature_2m;
+        ergebnis.min = min;
+        ergebnis.max = max;
+        ergebnis.average = durchschnitt;
+        return ergebnis;
     }
 
-    // ------------------------------ Programm --------------------------------
-
     public static void main(String[] args) {
-        WeatherClient client = new WeatherClient(
-                HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(15)).build());
+        WeatherClient client = new WeatherClient();
+        Scanner scanner = new Scanner(System.in);
+        ArrayList<CityWeather> results = new ArrayList<>();
 
-        String now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"));
-        System.out.println("=== Wetter-Vergleich (Stand: " + now + ") ===");
-        System.out.println("Gib mehrere Städte ein (je eine pro Zeile). Leere Zeile beendet die Eingabe.");
+        System.out.println("=== Wetter-Vergleich ===");
+        System.out.println("Gib mehrere Staedte ein (eine pro Zeile). Leere Zeile beendet die Eingabe.");
 
-        // Nicht-statische Parameter: die Städte kommen zur Laufzeit von der Konsole.
-        List<CityWeather> results = new ArrayList<>();
-        try (Scanner scanner = new Scanner(System.in)) {
-            while (true) {
-                System.out.print("> ");
-                if (!scanner.hasNextLine()) break;
-                String city = scanner.nextLine().trim();
-                if (city.isEmpty()) break;
+        // Schleife: fuer jede eingegebene Stadt beide APIs aufrufen
+        while (true) {
+            System.out.print("> ");
+            String city = scanner.nextLine().trim();
+            if (city.isEmpty()) {
+                break;
+            }
 
-                try {
-                    GeoResult place = client.geocode(city);          // API 1
-                    if (place == null) {
-                        System.out.println("  Ort '" + city + "' nicht gefunden.");
-                        continue;
-                    }
-                    ForecastResponse fc = client.forecast(              // API 2 (mit Output aus API 1)
-                            place.latitude, place.longitude);
-                    CityWeather w = client.summarize(place, fc);
-                    results.add(w);
-                    System.out.printf("  %s: jetzt %.1f°C (heute min %.1f / max %.1f / Ø %.1f°C)%n",
-                            w.label(), w.current(), w.min(), w.max(), w.average());
-                } catch (IOException | InterruptedException e) {
-                    System.out.println("  Fehler beim Abruf für '" + city + "': " + e.getMessage());
+            try {
+                GeoResult place = client.geocode(city); // API 1
+                if (place == null) {
+                    System.out.println("  Ort '" + city + "' nicht gefunden.");
+                    continue;
                 }
+                // Koordinaten aus API 1 als Eingabe fuer API 2
+                ForecastResponse fc = client.forecast(place.latitude, place.longitude); // API 2
+                CityWeather w = client.summarize(place, fc);
+                results.add(w);
+                System.out.println("  " + w.label + ": jetzt " + w.current
+                        + " Grad (heute min " + w.min + " / max " + w.max
+                        + " / Durchschnitt " + w.average + ")");
+            } catch (Exception e) {
+                System.out.println("  Fehler beim Abruf fuer '" + city + "': " + e.getMessage());
             }
         }
 
-        // Weiterverarbeitung über alle Aufrufe hinweg: Ranking nach aktueller Temperatur.
-        if (results.isEmpty()) {
+        // Weiterverarbeitung ueber alle Staedte: die waermste Stadt suchen
+        if (results.size() == 0) {
             System.out.println("Keine Daten abgerufen.");
             return;
         }
-        results.sort(Comparator.comparingDouble(CityWeather::current).reversed());
-        System.out.println("\n--- Ranking nach aktueller Temperatur ---");
-        int rank = 1;
-        for (CityWeather w : results) {
-            System.out.printf("%d. %s (%.1f°C)%n", rank++, w.label(), w.current());
+        CityWeather waermste = results.get(0);
+        for (int i = 1; i < results.size(); i++) {
+            if (results.get(i).current > waermste.current) {
+                waermste = results.get(i);
+            }
         }
-        CityWeather warmest = results.get(0);
-        System.out.println("Am wärmsten ist es gerade in " + warmest.label() + ".");
+        System.out.println();
+        System.out.println("Am waermsten ist es gerade in " + waermste.label
+                + " (" + waermste.current + " Grad).");
     }
 
-    // ------------------------ Datenklassen (JSON-Mapping) -------------------
+    // ---- einfache Klassen fuer das JSON. Gson fuellt die Felder automatisch. ----
 
-    /** Ergebnis der Verarbeitung. */
-    public record CityWeather(String label, double current, double min, double max, double average) {}
-
-    // Struktur der Geocoding-API (nur die benötigten Felder).
     static class GeoResponse {
-        List<GeoResult> results;
+        ArrayList<GeoResult> results;
     }
+
     static class GeoResult {
         String name;
         String country;
@@ -188,17 +165,27 @@ public class WeatherClient {
         double longitude;
     }
 
-    // Struktur der Forecast-API (nur die benötigten Felder).
     static class ForecastResponse {
         Current current;
         Hourly hourly;
     }
+
     static class Current {
         double temperature_2m;
         String time;
     }
+
     static class Hourly {
-        List<String> time;
-        List<Double> temperature_2m;
+        ArrayList<String> time;
+        ArrayList<Double> temperature_2m;
+    }
+
+    // Ergebnis-Klasse mit einfachen Feldern
+    static class CityWeather {
+        String label;
+        double current;
+        double min;
+        double max;
+        double average;
     }
 }
